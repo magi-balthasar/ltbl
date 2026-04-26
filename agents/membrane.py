@@ -49,8 +49,9 @@ class CellAgent:
         self.experience_accum = np.zeros(len(genome.to_vector()))
         self.experience_steps = 0
 
-        # Consciousness C1: log whether each action was internally driven
-        self.behavior_log: List[Tuple[bool, Tuple[float, float]]] = []
+        # Consciousness C1/C2: (internally_driven, (vx,vy), energy_trend, action_mag)
+        # internally_driven = responding to energy TREND (temporal signal), not just level
+        self.behavior_log: List[Tuple[bool, Tuple[float, float], float, float]] = []
         self.max_behavior_log = 64
 
     # ── Sensing ──────────────────────────────────────────────────────────────
@@ -86,21 +87,35 @@ class CellAgent:
         dx = float(np.sum(sensor_output * np.cos(angles)))
         dy = float(np.sum(sensor_output * np.sin(angles)))
 
-        # Homeostatic urgency: energy below 30% of replication threshold
-        low_energy = self.state.energy < self.genome.replication_threshold * 0.3
-        high_toxin = self.state.internal_toxin > 0.3
-        internally_driven = low_energy or high_toxin
+        # C1 fix: internally_driven = responding to energy TREND (temporal signal),
+        # not just instantaneous level. Requires ≥3 history points to compute trend.
+        # Threshold -0.008 calibrated to actual simulation energy decay rates (~-0.01/step).
+        trend = self.state.energy_trend()
+        has_temporal_signal = len(self.state.energy_history) >= 3
+        internally_driven = has_temporal_signal and trend < -0.008
 
-        urgency = 1.2 if low_energy else (0.8 if high_toxin else 0.5)
+        # Urgency modulated by trend magnitude (temporal), not by absolute energy level.
+        # Multiplier 15 chosen so typical decline (-0.012) produces urgency ~1.18.
+        if has_temporal_signal and trend < 0:
+            urgency = 1.0 + min(2.0, abs(trend) * 15.0)  # declining: push harder
+        elif has_temporal_signal and trend > 0.02:
+            urgency = 0.4                                  # recovering: conserve
+        else:
+            urgency = 0.7                                  # stable: neutral
+
+        # Toxin still triggers a reflex boost, but is NOT counted as internally_driven
+        if self.state.internal_toxin > 0.3:
+            urgency = max(urgency, 1.0)
 
         norm = np.sqrt(dx**2 + dy**2) + 1e-8
         speed = self.genome.max_speed * urgency * self.genome.actuator_sensitivity
         vx = dx / norm * speed
         vy = dy / norm * speed
 
+        action_mag = float(np.sqrt(vx**2 + vy**2))
         if len(self.behavior_log) >= self.max_behavior_log:
             self.behavior_log.pop(0)
-        self.behavior_log.append((internally_driven, (vx, vy)))
+        self.behavior_log.append((internally_driven, (vx, vy), trend, action_mag))
 
         return vx, vy
 

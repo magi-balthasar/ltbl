@@ -20,9 +20,11 @@ class ConsciousnessMonitor:
 
     def consciousness_level(self, metrics: Dict[str, float]) -> int:
         c0, c1, c2 = metrics['C0'], metrics['C1'], metrics['C2']
-        if c1 > 0.7 and c2 > 0.3:
+        # C2 > 0.2: trend reliably steers action (temporal loop closed)
+        if c1 > 0.5 and c2 > 0.2:
             return 2
-        if c1 > 0.3 or c0 > 2.0:
+        # C1 > 0.2: temporal signal drives behavior at least some of the time
+        if c1 > 0.2 or c0 > 2.0:
             return 1
         return 0
 
@@ -43,27 +45,34 @@ class ConsciousnessMonitor:
             scores.append(active * genome_dim / 25.0)
         return float(np.mean(scores))
 
-    # ── C1: fraction of internally-driven behavior ───────────────────────────
+    # ── C1: fraction of trend-driven behavior ───────────────────────────────
+    # "internally driven" = agent responded to energy TREND (temporal signal),
+    # not to instantaneous low energy. Separates temporal awareness from mere crisis.
 
     def _c1_internal_driven_ratio(self, agents: list) -> float:
         ratios = []
         for a in agents:
             if not a.behavior_log:
                 continue
-            driven = sum(1 for d, _ in a.behavior_log if d)
+            driven = sum(1 for entry in a.behavior_log if entry[0])
             ratios.append(driven / len(a.behavior_log))
         return float(np.mean(ratios)) if ratios else 0.0
 
-    # ── C2: temporal depth of internal comparison ────────────────────────────
+    # ── C2: correlation between energy trend and action intensity ────────────
+    # High C2 = agent consistently moves harder when energy is declining.
+    # Measures whether temporal comparison (trend) actually steers behavior.
 
     def _c2_temporal_depth(self, agents: list) -> float:
-        depths = []
+        corrs = []
         for a in agents:
-            h = a.state.energy_history
-            if len(h) < 3:
+            log = a.behavior_log
+            if len(log) < 8:
                 continue
-            gradients = np.diff(h)
-            fill = len(h) / a.state.max_history
-            depth = fill * (np.std(gradients) + abs(float(np.mean(gradients))))
-            depths.append(depth)
-        return float(np.mean(depths)) if depths else 0.0
+            trends = np.array([entry[2] for entry in log])
+            mags   = np.array([entry[3] for entry in log])
+            if np.std(trends) < 1e-8 or np.std(mags) < 1e-8:
+                continue
+            corr = float(np.corrcoef(trends, mags)[0, 1])
+            # Negative trend (declining) → high magnitude: negative corr → good.
+            corrs.append(max(0.0, -corr))
+        return float(np.mean(corrs)) if corrs else 0.0
