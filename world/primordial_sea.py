@@ -69,19 +69,39 @@ class PrimordialSea:
     def _tidal_factor(self) -> float:
         return 0.5 + 0.5 * np.sin(2 * np.pi * self.t / self.config.tidal_period)
 
-    def step(self):
+    def step(self, pressure: float = 0.0):
+        """
+        pressure: 0.0 = pristine, 1.0 = extreme stress.
+        Higher pressure → weaker vent output, stronger toxin, erratic pulsation.
+        The environment changes independently of agents — it is not a reward signal.
+        """
         self.nutrient = self._diffuse(self.nutrient, self.config.nutrient_diffusion)
         self.toxin = self._diffuse(self.toxin, self.config.toxin_diffusion)
 
-        self.nutrient *= (1 - self.config.nutrient_decay)
-        self.toxin *= (1 - self.config.toxin_decay)
+        # Pressure increases natural decay (resource depletion over geological time)
+        nutrient_decay = self.config.nutrient_decay * (1 + pressure * 4)
+        toxin_decay    = self.config.toxin_decay    * (1 - pressure * 0.5)  # toxin lingers longer
+        self.nutrient *= (1 - nutrient_decay)
+        self.toxin    *= (1 - max(0.0001, toxin_decay))
+
+        # Vent output weakens under pressure (hydrothermal activity declining)
+        vent_modifier = max(0.05, 1.0 - pressure * 0.85)
+        # Pulsation becomes more erratic under pressure
+        erratic = 1.0 + pressure * 2.0
 
         tidal = self._tidal_factor()
         for vx, vy, strength in self.vents:
-            pulse = 0.5 + 0.5 * np.sin(self.t * 0.3 + strength)
-            emission = strength * tidal * pulse * self.config.vent_pulse_strength
+            pulse = 0.5 + 0.5 * np.sin(self.t * 0.3 * erratic + strength)
+            emission = strength * tidal * pulse * self.config.vent_pulse_strength * vent_modifier
             self.nutrient[vy, vx] += emission
-            self.temperature[vy, vx] = 0.3 + strength * 0.5
+            self.temperature[vy, vx] = 0.3 + strength * 0.5 * vent_modifier
+
+        # New toxin seeps in as pressure rises (volcanic / UV analogue)
+        if pressure > 0.2:
+            seep_intensity = (pressure - 0.2) * 0.05
+            seep_x = int(self.t * 7.3) % self.W
+            seep_y = int(self.t * 3.7) % self.H
+            self.toxin[seep_y, seep_x] += seep_intensity
 
         np.clip(self.nutrient, 0, 10, out=self.nutrient)
         np.clip(self.toxin, 0, 5, out=self.toxin)

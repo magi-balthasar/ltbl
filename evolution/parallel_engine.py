@@ -47,14 +47,16 @@ class IslandActor:
 
     # ── Simulation step ──────────────────────────────────────────────────────
 
-    def step(self) -> Dict[str, Any]:
+    def step(self, pressure: float = 0.0) -> Dict[str, Any]:
         from agents.membrane import CellAgent
         from genetics.genome import Genome
 
         W, H = self.cfg.world_width, self.cfg.world_height
+        births = 0
+        deaths = 0
 
         for _ in range(self.cfg.ticks_per_step):
-            self.sea.step()
+            self.sea.step(pressure)
             next_gen: List[CellAgent] = []
 
             for agent in self.agents:
@@ -64,6 +66,7 @@ class IslandActor:
                     metrics = self.monitor.measure([agent])
                     c_level = self.monitor.consciousness_level(metrics)
                     self.tracker.record_death(agent, self.tick, c_level)
+                    deaths += 1
                     continue
 
                 if (agent.can_replicate()
@@ -78,6 +81,7 @@ class IslandActor:
                     )
                     next_gen.append(child)
                     self.tracker.register(child, self.tick)
+                    births += 1
 
                 next_gen.append(agent)
 
@@ -86,6 +90,11 @@ class IslandActor:
 
         metrics = self.monitor.measure(self.agents)
         c_level = self.monitor.consciousness_level(metrics)
+
+        # Clustering signal: average nearest-neighbour distance (normalised).
+        # Decreasing trend → agents converging → potential Phase 2 precursor.
+        cluster_signal = self._clustering_signal(W, H)
+        survival_rate = 1.0 - (deaths / max(deaths + births, 1))
 
         return {
             'island_id':            self.cfg.island_id,
@@ -98,7 +107,27 @@ class IslandActor:
             'avg_generation':       float(np.mean([a.genome.generation for a in self.agents])) if self.agents else 0.0,
             'max_generation':       self.tracker.max_generation(),
             'avg_energy':           float(np.mean([a.state.energy for a in self.agents])) if self.agents else 0.0,
+            'survival_rate':        survival_rate,
+            'cluster_signal':       cluster_signal,
+            'pressure':             pressure,
         }
+
+    def _clustering_signal(self, W: int, H: int) -> float:
+        """0 = perfectly dispersed, 1 = maximally clustered."""
+        if len(self.agents) < 4:
+            return 0.0
+        positions = np.array([(a.x, a.y) for a in self.agents])
+        # Expected average nn-distance for uniform random distribution ≈ 0.5/sqrt(density)
+        density = len(self.agents) / (W * H)
+        expected_nn = 0.5 / max(np.sqrt(density), 1e-6)
+        # Compute actual avg nn-distance (periodic boundary via simple approximation)
+        from scipy.spatial.distance import cdist
+        D = cdist(positions, positions)
+        np.fill_diagonal(D, np.inf)
+        actual_nn = float(np.mean(D.min(axis=1)))
+        # Signal: how much closer agents are than expected (clamped 0-1)
+        signal = max(0.0, 1.0 - actual_nn / max(expected_nn, 1e-6))
+        return min(1.0, signal)
 
     def _replicate(self, agent):
         mode = self.cfg.replication_mode
@@ -149,11 +178,10 @@ class ParallelExperimentEngine:
         self.configs = configs
         self.step_count = 0
 
-    def run_step(self) -> List[Dict[str, Any]]:
-        futures = [island.step.remote() for island in self.islands]
+    def run_step(self, pressure: float = 0.0) -> List[Dict[str, Any]]:
+        futures = [island.step.remote(pressure) for island in self.islands]
         results = ray.get(futures)
 
-        # Periodic migration between islands
         if self.step_count > 0 and self.step_count % self.configs[0].migration_interval == 0:
             self._migrate(n=3)
 

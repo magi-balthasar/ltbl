@@ -50,9 +50,13 @@ def run_single_island(args):
         Genome(), mode='asexual'
     ) for i in range(cfg.initial_agents)]
 
+    from world.pressure_schedule import PressureSchedule
+    pressure = PressureSchedule()
+
     print("=== LTBL [single-island debug] ===\n")
     for step in range(args.steps):
-        sea.step()
+        pressure.tick()
+        sea.step(pressure.level)
         next_gen = []
         for a in agents:
             a.step(sea, (cfg.world_width, cfg.world_height))
@@ -71,33 +75,40 @@ def run_single_island(args):
             avg_e = sum(a.state.energy for a in agents) / max(len(agents), 1)
             avg_g = sum(a.genome.generation for a in agents) / max(len(agents), 1)
             print(f"step={step:4d}  pop={len(agents):4d}  gen={avg_g:5.1f}  "
-                  f"E={avg_e:5.2f}  C={c}  C1={metrics['C1']:.2f}  C2={metrics['C2']:.2f}")
+                  f"E={avg_e:5.2f}  P={pressure.level:.3f}  "
+                  f"C={c}  C1={metrics['C1']:.2f}  C2={metrics['C2']:.2f}")
 
 
 def run_parallel(args):
+    from world.pressure_schedule import PressureSchedule
+
     configs = default_experiment()
     engine = ParallelExperimentEngine(configs, working_dir=os.path.dirname(os.path.abspath(__file__)))
     observer = GodObserver(db_path=args.db)
-    intervener = GodIntervener(engine.islands)
+    pressure = PressureSchedule()
+    intervener = GodIntervener(engine.islands, pressure)
 
     print("=== LTBL: Let There Be Light ===")
-    print(f"Phase 1-A | {len(configs)} islands | {args.steps} steps\n")
+    print(f"8 islands | {args.steps} steps | pressure-driven evolution\n")
 
     try:
         for step in range(args.steps):
-            results = engine.run_step()
+            pressure.tick()
+            results = engine.run_step(pressure.level)
             observer.observe(step, results)
 
             if step % args.report == 0:
-                print(observer.report(step, results))
-                events = observer.detect_emergence(results)
-                for ev in events:
-                    print(f"  *** EMERGENCE [{ev['type']}] island={ev['island_id']} ***")
+                print(observer.report(step, results, pressure.level))
+                for ev in observer.detect_emergence(results):
+                    print(f"  *** [{ev['type']}] island={ev['island_id']} ***")
+                for sig in observer.phase_transition_signals(results):
+                    print(f"  >>> {sig}")
                 print()
 
             if step > 0 and step % args.intervene == 0:
-                intervener.redistribute_resources(results)
-                intervener.cross_pollinate(results)
+                intervener.calibrate_pressure(results)
+                intervener.rescue_dying_islands(results)
+                intervener.cross_pollinate_top(results)
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
