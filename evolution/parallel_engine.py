@@ -54,6 +54,7 @@ class IslandActor:
         W, H = self.cfg.world_width, self.cfg.world_height
         births = 0
         deaths = 0
+        died_records: List[Dict] = []   # lineage data for Noah's Ark & evo-map
 
         for _ in range(self.cfg.ticks_per_step):
             self.sea.step(pressure)
@@ -67,6 +68,19 @@ class IslandActor:
                     c_level = self.monitor.consciousness_level(metrics)
                     self.tracker.record_death(agent, self.tick, c_level)
                     deaths += 1
+                    # Record full lineage snapshot for God layer
+                    died_records.append({
+                        'genome_id':        agent.genome.id,
+                        'parent_ids':       list(agent.genome.parent_ids),
+                        'generation':       agent.genome.generation,
+                        'replication_mode': agent.mode,
+                        'island_id':        self.cfg.island_id,
+                        'pressure_born':    0.0,   # approximation; refined via tracker
+                        'pressure_died':    pressure,
+                        'lifespan':         agent.state.age,
+                        'c_level':          c_level,
+                        'genome_snapshot':  agent.genome.to_vector().tolist(),
+                    })
                     continue
 
                 if (agent.can_replicate()
@@ -110,6 +124,7 @@ class IslandActor:
             'survival_rate':        survival_rate,
             'cluster_signal':       cluster_signal,
             'pressure':             pressure,
+            'died_records':         died_records,   # for Noah's Ark & evolutionary map
         }
 
     def _clustering_signal(self, W: int, H: int) -> float:

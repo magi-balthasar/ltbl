@@ -17,6 +17,9 @@ from evolution.island_model import default_experiment, IslandConfig
 from evolution.parallel_engine import ParallelExperimentEngine
 from god.observer import GodObserver
 from god.intervener import GodIntervener
+from god.evolutionary_map import EvolutionaryMap
+from genetics.genome_archive import GenomeArchive
+from genetics.genome import Genome
 
 
 def parse_args():
@@ -83,9 +86,11 @@ def run_parallel(args):
     from world.pressure_schedule import PressureSchedule
 
     configs = default_experiment()
-    engine = ParallelExperimentEngine(configs, working_dir=os.path.dirname(os.path.abspath(__file__)))
-    observer = GodObserver(db_path=args.db)
-    pressure = PressureSchedule()
+    engine    = ParallelExperimentEngine(configs, working_dir=os.path.dirname(os.path.abspath(__file__)))
+    observer  = GodObserver(db_path=args.db)
+    evo_map   = EvolutionaryMap(db_path=args.db)
+    archive   = GenomeArchive(capacity=300, min_distance=1.0)
+    pressure  = PressureSchedule()
     intervener = GodIntervener(engine.islands, pressure)
 
     print("=== LTBL: Let There Be Light ===")
@@ -97,14 +102,32 @@ def run_parallel(args):
             results = engine.run_step(pressure.level)
             observer.observe(step, results)
 
+            # ── 2차: Noah's Ark + 3차: Evolutionary Map ─────────────────────
+            all_died = []
+            for r in results:
+                for rec in r.get('died_records', []):
+                    all_died.append(rec)
+                    # Noah's Ark: consider every dead genome for structural diversity
+                    g = Genome.from_vector(
+                        __import__('numpy').array(rec['genome_snapshot']),
+                        parent_ids=rec['parent_ids'],
+                        generation=rec['generation'],
+                    )
+                    archive.consider(g, rec)
+            if all_died:
+                evo_map.record_lineage(all_died)
+
+            # ── Report ───────────────────────────────────────────────────────
             if step % args.report == 0:
                 print(observer.report(step, results, pressure.level))
+                print(f"  [Archive] {archive.stats}")
                 for ev in observer.detect_emergence(results):
                     print(f"  *** [{ev['type']}] island={ev['island_id']} ***")
                 for sig in observer.phase_transition_signals(results):
                     print(f"  >>> {sig}")
                 print()
 
+            # ── Intervention ─────────────────────────────────────────────────
             if step > 0 and step % args.intervene == 0:
                 intervener.calibrate_pressure(results)
                 intervener.rescue_dying_islands(results)
@@ -113,9 +136,13 @@ def run_parallel(args):
     except KeyboardInterrupt:
         print("\nInterrupted.")
     finally:
+        # Print evolutionary map summary before exit
+        print()
+        print(evo_map.phase_transition_hints())
         observer.close()
+        evo_map.close()
         engine.shutdown()
-        print("Simulation complete. Data saved to", args.db)
+        print("\nSimulation complete. Data saved to", args.db)
 
 
 def main():
