@@ -6,6 +6,7 @@ import uuid
 
 GENOME_SCHEMA = [
     # (name, default, min, max)
+    # ── Phase 1-A: membrane scalars ──────────────────────────────────────────
     ('sensor_range',          2.0,  0.5,  5.0),
     ('max_speed',             0.5,  0.05, 2.0),
     ('actuator_sensitivity',  1.0,  0.1,  5.0),
@@ -15,6 +16,10 @@ GENOME_SCHEMA = [
     ('replication_cost',      3.0,  0.5,  10.0),
     ('toxin_resistance',      0.1,  0.0,   1.0),
     ('membrane_permeability', 0.5,  0.1,   1.0),
+    # ── Phase 1-B: chemotaxis scalars (ignored by membrane agents) ───────────
+    ('run_duration',          8.0,  1.0,  30.0),   # ticks to keep running
+    ('tumble_bias',           0.15, 0.01,  0.6),   # base tumble rate (no history)
+    ('gradient_weight',       0.5,  0.0,   1.0),   # gradient vs internal urgency
 ]
 
 SENSOR_COUNT = 8
@@ -44,6 +49,10 @@ class Genome:
     replication_cost: float = 3.0
     toxin_resistance: float = 0.1
     membrane_permeability: float = 0.5
+    # Phase 1-B chemotaxis
+    run_duration: float = 8.0
+    tumble_bias: float = 0.15
+    gradient_weight: float = 0.5
 
     def to_vector(self) -> np.ndarray:
         scalars = [getattr(self, name) for name, *_ in GENOME_SCHEMA]
@@ -59,7 +68,8 @@ class Genome:
         g.mutation_count = 0
         g.sensor_weights = vec[:SENSOR_COUNT].copy()
         for i, (name, default, lo, hi) in enumerate(GENOME_SCHEMA):
-            val = float(np.clip(vec[SENSOR_COUNT + i], lo, hi))
+            idx = SENSOR_COUNT + i
+            val = float(np.clip(vec[idx], lo, hi)) if idx < len(vec) else default
             setattr(g, name, val)
         return g
 

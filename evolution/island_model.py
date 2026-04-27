@@ -15,23 +15,34 @@ class IslandConfig:
     migration_interval: int = 20        # steps between migration events
     ticks_per_step: int = 50
     vent_count: int = 3
+    agent_type: str = 'membrane'        # 'membrane' (1-A) | 'chemotaxis' (1-B)
 
 
 def default_experiment() -> List[IslandConfig]:
-    """8-island setup: 3 replication modes × mutation rates + high-stress control."""
+    """
+    8-island setup: 4 membrane (Phase 1-A) + 4 chemotaxis (Phase 1-B).
+    Migration is enabled between all islands — chemotaxis genes are present
+    but silent in membrane agents (backward-compatible genome).
+    """
     return [
-        # Asexual — low / medium / high mutation
-        IslandConfig(island_id=0, replication_mode='asexual',    mutation_rate=0.005),
-        IslandConfig(island_id=1, replication_mode='asexual',    mutation_rate=0.02),
-        IslandConfig(island_id=2, replication_mode='asexual',    mutation_rate=0.08),
-        # Sexual
-        IslandConfig(island_id=3, replication_mode='sexual',     mutation_rate=0.01),
-        IslandConfig(island_id=4, replication_mode='sexual',     mutation_rate=0.04),
-        # Lamarckian
-        IslandConfig(island_id=5, replication_mode='lamarckian', mutation_rate=0.01),
-        IslandConfig(island_id=6, replication_mode='lamarckian', mutation_rate=0.04),
-        # High-stress: small world, few vents
-        IslandConfig(island_id=7, replication_mode='asexual',    mutation_rate=0.03,
-                     world_width=80, world_height=80, initial_agents=30,
-                     max_agents=200, vent_count=1),
+        # ── Phase 1-A: Membrane (homeostasis + energy-trend) ─────────────────
+        IslandConfig(island_id=0, agent_type='membrane',   replication_mode='asexual',
+                     mutation_rate=0.01),
+        IslandConfig(island_id=1, agent_type='membrane',   replication_mode='sexual',
+                     mutation_rate=0.01),
+        IslandConfig(island_id=2, agent_type='membrane',   replication_mode='lamarckian',
+                     mutation_rate=0.01),
+        IslandConfig(island_id=3, agent_type='membrane',   replication_mode='asexual',
+                     mutation_rate=0.05, world_width=80, world_height=80,
+                     initial_agents=30, max_agents=200, vent_count=1),
+        # ── Phase 1-B: Chemotaxis (Run/Tumble + gradient temporal awareness) ─
+        IslandConfig(island_id=4, agent_type='chemotaxis', replication_mode='asexual',
+                     mutation_rate=0.01),
+        IslandConfig(island_id=5, agent_type='chemotaxis', replication_mode='sexual',
+                     mutation_rate=0.01),
+        IslandConfig(island_id=6, agent_type='chemotaxis', replication_mode='lamarckian',
+                     mutation_rate=0.01),
+        IslandConfig(island_id=7, agent_type='chemotaxis', replication_mode='asexual',
+                     mutation_rate=0.05, world_width=80, world_height=80,
+                     initial_agents=30, max_agents=200, vent_count=1),
     ]

@@ -32,7 +32,7 @@ class GodObserver:
                 mutation_rate    REAL,
                 population       INTEGER,
                 c_level          INTEGER,
-                c0 REAL, c1 REAL, c2 REAL,
+                c0 REAL, c1 REAL, c2 REAL, c2b REAL,
                 avg_generation   REAL,
                 max_generation   INTEGER,
                 avg_energy       REAL,
@@ -64,7 +64,7 @@ class GodObserver:
                 ts, step,
                 r['island_id'], r['replication_mode'], r['mutation_rate'],
                 r['population'], r['consciousness_level'],
-                m['C0'], m['C1'], m['C2'],
+                m['C0'], m['C1'], m['C2'], m.get('C2b', 0.0),
                 r['avg_generation'], r['max_generation'], r['avg_energy'],
                 r.get('survival_rate', 1.0),
                 r.get('cluster_signal', 0.0),
@@ -81,7 +81,7 @@ class GodObserver:
                 )
 
         self.conn.executemany(
-            'INSERT INTO observations VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', rows
+            'INSERT INTO observations VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', rows
         )
         self.conn.commit()
 
@@ -93,13 +93,15 @@ class GodObserver:
         ]
         for r in results:
             m = r['consciousness_metrics']
-            cluster = r.get('cluster_signal', 0.0)
-            surv    = r.get('survival_rate', 1.0)
+            cluster  = r.get('cluster_signal', 0.0)
+            surv     = r.get('survival_rate', 1.0)
+            atype    = r.get('agent_type', 'membrane')
+            c2b_str  = f" C2b={m.get('C2b', 0.0):.2f}" if atype == 'chemotaxis' else ''
             lines.append(
-                f"│ [{r['island_id']}] {r['replication_mode']:12s} μ={r['mutation_rate']:.3f} "
+                f"│ [{r['island_id']}] {atype[0].upper()}{r['replication_mode']:11s} μ={r['mutation_rate']:.3f} "
                 f"pop={r['population']:4d} gen={r['avg_generation']:4.1f}/{r['max_generation']:3d} "
                 f"E={r['avg_energy']:4.2f} surv={surv:.2f} clust={cluster:.2f}  "
-                f"C={r['consciousness_level']} C1={m['C1']:.2f} C2={m['C2']:.2f}"
+                f"C={r['consciousness_level']} C1={m['C1']:.2f} C2={m['C2']:.2f}{c2b_str}"
             )
         lines.append("└───────────────────────────────────────────────────────────────────┘")
         return "\n".join(lines)

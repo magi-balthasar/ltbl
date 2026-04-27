@@ -18,12 +18,15 @@ class IslandActor:
 
         from world.primordial_sea import PrimordialSea, SeaConfig
         from agents.membrane import CellAgent
+        from agents.chemotaxis import ChemotaxisAgent
         from genetics.genome import Genome
         from genetics.replication import ReplicationEngine
         from genetics.lineage_tracker import LineageTracker
         from consciousness.level_monitor import ConsciousnessMonitor
 
         self.cfg = config
+        self.agent_cls = ChemotaxisAgent if config.agent_type == 'chemotaxis' else CellAgent
+
         self.sea = PrimordialSea(SeaConfig(
             width=config.world_width, height=config.world_height,
             vent_count=config.vent_count,
@@ -35,20 +38,19 @@ class IslandActor:
         self.tracker = LineageTracker()
         self.monitor = ConsciousnessMonitor()
         self.tick = 0
-        self.agents: List[CellAgent] = []
+        self.agents: List = []
 
         for _ in range(config.initial_agents):
             g = Genome()
             x = np.random.uniform(0, config.world_width)
             y = np.random.uniform(0, config.world_height)
-            a = CellAgent(x, y, g, mode=config.replication_mode)
+            a = self.agent_cls(x, y, g, mode=config.replication_mode)
             self.agents.append(a)
             self.tracker.register(a, self.tick)
 
     # ── Simulation step ──────────────────────────────────────────────────────
 
     def step(self, pressure: float = 0.0) -> Dict[str, Any]:
-        from agents.membrane import CellAgent
         from genetics.genome import Genome
 
         W, H = self.cfg.world_width, self.cfg.world_height
@@ -87,7 +89,7 @@ class IslandActor:
                         and len(next_gen) + len(self.agents) < self.cfg.max_agents):
                     agent.pay_replication_cost()
                     child_genome = self._replicate(agent)
-                    child = CellAgent(
+                    child = self.agent_cls(
                         (agent.x + np.random.uniform(-1, 1)) % W,
                         (agent.y + np.random.uniform(-1, 1)) % H,
                         child_genome,
@@ -112,6 +114,7 @@ class IslandActor:
 
         return {
             'island_id':            self.cfg.island_id,
+            'agent_type':           self.cfg.agent_type,
             'replication_mode':     self.cfg.replication_mode,
             'mutation_rate':        self.cfg.mutation_rate,
             'tick':                 self.tick,
@@ -165,14 +168,13 @@ class IslandActor:
                 for a in chosen]
 
     def receive_immigrants(self, data: List[Tuple]):
-        from agents.membrane import CellAgent
         from genetics.genome import Genome
         for vec_list, gen, parent_ids in data:
             vec = np.array(vec_list)
             genome = Genome.from_vector(vec, parent_ids=parent_ids, generation=gen)
             x = np.random.uniform(0, self.cfg.world_width)
             y = np.random.uniform(0, self.cfg.world_height)
-            a = CellAgent(x, y, genome, mode=self.cfg.replication_mode)
+            a = self.agent_cls(x, y, genome, mode=self.cfg.replication_mode)
             self.agents.append(a)
             self.tracker.register(a, self.tick)
 
