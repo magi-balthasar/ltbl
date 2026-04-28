@@ -52,7 +52,7 @@ class ArchiveEntry:
 class GenomeArchive:
     """Maintains a structurally diverse genome pool across all islands."""
 
-    def __init__(self, capacity: int = 300, min_distance: float = 1.0):
+    def __init__(self, capacity: int = 300, min_distance: float = 0.02):
         self.capacity = capacity
         self.min_distance = min_distance
         self.entries: List[ArchiveEntry] = []

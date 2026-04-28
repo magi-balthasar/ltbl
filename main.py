@@ -89,7 +89,7 @@ def run_parallel(args):
     engine    = ParallelExperimentEngine(configs, working_dir=os.path.dirname(os.path.abspath(__file__)))
     observer  = GodObserver(db_path=args.db)
     evo_map   = EvolutionaryMap(db_path=args.db)
-    archive   = GenomeArchive(capacity=300, min_distance=1.0)
+    archive   = GenomeArchive(capacity=300, min_distance=0.02)
     pressure  = PressureSchedule()
     intervener = GodIntervener(engine.islands, pressure)
 
