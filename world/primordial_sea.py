@@ -15,6 +15,11 @@ class SeaConfig:
     vent_count: int = 3
     tidal_period: float = 100.0
     vent_pulse_strength: float = 2.0
+    # Phase 1-C: light
+    light_orbit_period: float = 200.0   # ticks per full orbit
+    light_orbit_radius: float = 0.35    # fraction of world size
+    light_sigma: float = 0.15          # Gaussian spread (fraction of world size)
+    light_max_intensity: float = 1.0
 
 
 class PrimordialSea:
@@ -29,9 +34,17 @@ class PrimordialSea:
         self.nutrient = np.zeros((self.H, self.W))
         self.toxin = np.zeros((self.H, self.W))
         self.temperature = np.ones((self.H, self.W)) * 0.3
+        self.light = np.zeros((self.H, self.W))   # Phase 1-C: orbiting light
+        self.light_tick = 0
+
+        # Pre-compute meshgrid for vectorised light calculation
+        ys, xs = np.mgrid[0:self.H, 0:self.W]
+        self._ys = ys.astype(float)
+        self._xs = xs.astype(float)
 
         self.vents: List[Tuple[int, int, float]] = self._init_vents()
         self._init_toxin_patches()
+        self._update_light()   # initialise light
 
     def _init_vents(self) -> List[Tuple[int, int, float]]:
         vents = []
@@ -57,6 +70,20 @@ class PrimordialSea:
                     ny = (cy - 15 + dy) % self.H
                     nx = (cx - 15 + dx) % self.W
                     self.toxin[ny, nx] += patch[dy, dx]
+
+    def _update_light(self):
+        """Orbiting light source: predictable sinusoidal path around world centre."""
+        cfg = self.config
+        angle = 2 * np.pi * self.light_tick / cfg.light_orbit_period
+        # Day/night intensity: max at peak, fades to 0.1 at nadir
+        intensity = cfg.light_max_intensity * (0.55 + 0.45 * np.sin(angle))
+        cx = self.W / 2 + self.W * cfg.light_orbit_radius * np.cos(angle)
+        cy = self.H / 2 + self.H * cfg.light_orbit_radius * np.sin(angle)
+        sigma_x = self.W * cfg.light_sigma
+        sigma_y = self.H * cfg.light_sigma
+        d2 = ((self._xs - cx) / sigma_x) ** 2 + ((self._ys - cy) / sigma_y) ** 2
+        self.light = intensity * np.exp(-0.5 * d2)
+        np.clip(self.light, 0.0, cfg.light_max_intensity, out=self.light)
 
     def _diffuse(self, grid: np.ndarray, rate: float) -> np.ndarray:
         laplacian = (
@@ -105,6 +132,8 @@ class PrimordialSea:
 
         np.clip(self.nutrient, 0, 10, out=self.nutrient)
         np.clip(self.toxin, 0, 5, out=self.toxin)
+        self.light_tick += 1
+        self._update_light()
         self.t += self.config.dt
 
     def sample(self, x: float, y: float, radius: int = 1) -> Dict[str, np.ndarray]:
@@ -115,10 +144,16 @@ class PrimordialSea:
                 nx, ny = (ix + dx) % self.W, (iy + dy) % self.H
                 nutrient_vals.append(self.nutrient[ny, nx])
                 toxin_vals.append(self.toxin[ny, nx])
+        light_vals = []
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                nx, ny = (ix + dx) % self.W, (iy + dy) % self.H
+                light_vals.append(self.light[ny, nx])
         return {
             'nutrient': np.array(nutrient_vals),
-            'toxin': np.array(toxin_vals),
-            'temp': float(self.temperature[iy, ix]),
+            'toxin':    np.array(toxin_vals),
+            'light':    np.array(light_vals),
+            'temp':     float(self.temperature[iy, ix]),
         }
 
     def consume(self, x: float, y: float, amount: float) -> float:

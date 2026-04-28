@@ -12,18 +12,23 @@ class ConsciousnessMonitor:
             'C0':  self._c0_internal_complexity(agents),
             'C1':  self._c1_internal_driven_ratio(agents),
             'C2':  self._c2_temporal_depth(agents),
-            'C2b': self._c2b_gradient_temporal(agents),  # Phase 1-B: gradient temporal
-            'C3':  0.0,  # prediction accuracy — Phase 1-C
-            'C4':  0.0,  # self-model — Phase 1-C+
-            'C5':  0.0,  # other-model — Phase 1-D+
-            'C6':  0.0,  # recursive self-reference — Phase 7
+            'C2b': self._c2b_gradient_temporal(agents),
+            'C3':  self._c3_prediction_accuracy(agents),  # Phase 1-C: light prediction
+            'C4':  0.0,
+            'C5':  0.0,
+            'C6':  0.0,
         }
 
     def consciousness_level(self, metrics: Dict[str, float]) -> int:
-        c0, c1, c2 = metrics['C0'], metrics['C1'], metrics['C2']
+        c0  = metrics['C0']
+        c1  = metrics['C1']
+        c2  = metrics['C2']
         c2b = metrics.get('C2b', 0.0)
-        # C2: energy-trend steers action (1-A temporal loop)
-        # C2b: gradient-trend steers tumble decision (1-B temporal loop)
+        c3  = metrics.get('C3',  0.0)
+        # C=3: agent correctly predicts future state and acts on it
+        if c3 > 0.3:
+            return 3
+        # C=2: temporal loop closed (energy-trend or gradient-tumble)
         if (c1 > 0.5 and c2 > 0.2) or c2b > 0.3:
             return 2
         if c1 > 0.2 or c0 > 2.0 or c2b > 0.1:
@@ -76,6 +81,32 @@ class ConsciousnessMonitor:
                 continue
             corr = float(np.corrcoef(trends, mags)[0, 1])
             corrs.append(max(0.0, -corr))
+        return float(np.mean(corrs)) if corrs else 0.0
+
+    # ── C3: prediction accuracy (Phase 1-C phototaxis) ──────────────────────
+    # Detects 8-tuple entries (phototaxis) via len(entry) >= 8.
+    # predicted_light[t] = actual_light[t] + light_trend[t] * prediction_depth
+    # C3 = corr(predicted[t], actual[t + k]) over the log window.
+    # High C3 = agent's light extrapolation consistently matches future reality.
+
+    def _c3_prediction_accuracy(self, agents: list) -> float:
+        corrs = []
+        for a in agents:
+            log = [e for e in a.behavior_log if len(e) >= 8]
+            if len(log) < 10:
+                continue
+            pred_depth = max(1, int(getattr(a.genome, 'prediction_depth', 3.0)))
+            if len(log) <= pred_depth:
+                continue
+            # predicted_light at time t
+            pred_depth = min(pred_depth, len(log) - 1)
+            predicted = np.array([e[7] + e[6] * pred_depth for e in log[:-pred_depth]])
+            # actual light at time t + pred_depth
+            actual    = np.array([e[7] for e in log[pred_depth:]])
+            if np.std(predicted) < 1e-8 or np.std(actual) < 1e-8:
+                continue
+            corr = float(np.corrcoef(predicted, actual)[0, 1])
+            corrs.append(max(0.0, corr))   # positive corr = prediction matched
         return float(np.mean(corrs)) if corrs else 0.0
 
     # ── C2b: gradient temporal depth (Phase 1-B chemotaxis) ─────────────────

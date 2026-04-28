@@ -19,13 +19,19 @@ class IslandActor:
         from world.primordial_sea import PrimordialSea, SeaConfig
         from agents.membrane import CellAgent
         from agents.chemotaxis import ChemotaxisAgent
+        from agents.phototaxis import PhototaxisAgent
         from genetics.genome import Genome
         from genetics.replication import ReplicationEngine
         from genetics.lineage_tracker import LineageTracker
         from consciousness.level_monitor import ConsciousnessMonitor
 
         self.cfg = config
-        self.agent_cls = ChemotaxisAgent if config.agent_type == 'chemotaxis' else CellAgent
+        if config.agent_type == 'phototaxis':
+            self.agent_cls = PhototaxisAgent
+        elif config.agent_type == 'chemotaxis':
+            self.agent_cls = ChemotaxisAgent
+        else:
+            self.agent_cls = CellAgent
 
         self.sea = PrimordialSea(SeaConfig(
             width=config.world_width, height=config.world_height,

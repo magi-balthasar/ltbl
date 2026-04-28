@@ -20,6 +20,10 @@ GENOME_SCHEMA = [
     ('run_duration',          8.0,  1.0,  30.0),   # ticks to keep running
     ('tumble_bias',           0.15, 0.01,  0.6),   # base tumble rate (no history)
     ('gradient_weight',       0.5,  0.0,   1.0),   # gradient vs internal urgency
+    # ── Phase 1-C: phototaxis scalars (ignored by 1-A/1-B agents) ───────────
+    ('light_sensitivity',     0.3,  0.0,   1.0),   # photosynthesis efficiency
+    ('uv_resistance',         0.5,  0.0,   1.0),   # protection from excess light
+    ('prediction_depth',      3.0,  1.0,  10.0),   # ticks ahead to predict
 ]
 
 SENSOR_COUNT = 8
@@ -53,6 +57,10 @@ class Genome:
     run_duration: float = 8.0
     tumble_bias: float = 0.15
     gradient_weight: float = 0.5
+    # Phase 1-C phototaxis
+    light_sensitivity: float = 0.3
+    uv_resistance: float = 0.5
+    prediction_depth: float = 3.0
 
     def to_vector(self) -> np.ndarray:
         scalars = [getattr(self, name) for name, *_ in GENOME_SCHEMA]
