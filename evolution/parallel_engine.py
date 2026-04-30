@@ -20,13 +20,16 @@ class IslandActor:
         from agents.membrane import CellAgent
         from agents.chemotaxis import ChemotaxisAgent
         from agents.phototaxis import PhototaxisAgent
+        from agents.quorum import QuorumSensingAgent
         from genetics.genome import Genome
         from genetics.replication import ReplicationEngine
         from genetics.lineage_tracker import LineageTracker
         from consciousness.level_monitor import ConsciousnessMonitor
 
         self.cfg = config
-        if config.agent_type == 'phototaxis':
+        if config.agent_type == 'quorum':
+            self.agent_cls = QuorumSensingAgent
+        elif config.agent_type == 'phototaxis':
             self.agent_cls = PhototaxisAgent
         elif config.agent_type == 'chemotaxis':
             self.agent_cls = ChemotaxisAgent

@@ -24,6 +24,11 @@ GENOME_SCHEMA = [
     ('light_sensitivity',     0.3,  0.0,   1.0),   # photosynthesis efficiency
     ('uv_resistance',         0.5,  0.0,   1.0),   # protection from excess light
     ('prediction_depth',      3.0,  1.0,  10.0),   # ticks ahead to predict
+    # ── Phase 1-D: quorum sensing scalars (ignored by earlier agents) ────────
+    ('signal_production',     0.3,  0.0,   1.0),   # autoinducer deposit rate
+    ('signal_sensitivity',    0.5,  0.0,   1.0),   # gain on sensed quorum signal
+    ('quorum_threshold',      0.4,  0.05,  1.0),   # signal level to enter collective mode
+    ('collective_bias',       0.5,  0.0,   1.0),   # blend: 0=individual, 1=collective
 ]
 
 SENSOR_COUNT = 8
@@ -61,6 +66,11 @@ class Genome:
     light_sensitivity: float = 0.3
     uv_resistance: float = 0.5
     prediction_depth: float = 3.0
+    # Phase 1-D quorum sensing
+    signal_production: float = 0.3
+    signal_sensitivity: float = 0.5
+    quorum_threshold: float = 0.4
+    collective_bias: float = 0.5
 
     def to_vector(self) -> np.ndarray:
         scalars = [getattr(self, name) for name, *_ in GENOME_SCHEMA]

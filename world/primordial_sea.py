@@ -20,6 +20,9 @@ class SeaConfig:
     light_orbit_radius: float = 0.35    # fraction of world size
     light_sigma: float = 0.15          # Gaussian spread (fraction of world size)
     light_max_intensity: float = 1.0
+    # Phase 1-D: quorum signal
+    signal_evaporation_rate: float = 0.02   # per-tick signal decay
+    signal_diffusion_sigma: float = 0.5     # gaussian diffusion spread
 
 
 class PrimordialSea:
@@ -36,6 +39,7 @@ class PrimordialSea:
         self.temperature = np.ones((self.H, self.W)) * 0.3
         self.light = np.zeros((self.H, self.W))   # Phase 1-C: orbiting light
         self.light_tick = 0
+        self.agent_signal = np.zeros((self.H, self.W), dtype=np.float32)  # Phase 1-D
 
         # Pre-compute meshgrid for vectorised light calculation
         ys, xs = np.mgrid[0:self.H, 0:self.W]
@@ -134,26 +138,36 @@ class PrimordialSea:
         np.clip(self.toxin, 0, 5, out=self.toxin)
         self.light_tick += 1
         self._update_light()
+        # Phase 1-D: agent signal diffuses and evaporates
+        from scipy.ndimage import gaussian_filter
+        self.agent_signal *= (1.0 - self.config.signal_evaporation_rate)
+        self.agent_signal = gaussian_filter(self.agent_signal,
+                                            sigma=self.config.signal_diffusion_sigma)
+        np.clip(self.agent_signal, 0.0, 5.0, out=self.agent_signal)
         self.t += self.config.dt
+
+    def deposit_signal(self, x: float, y: float, amount: float):
+        """Agent deposits quorum-sensing chemical at its position."""
+        ix = int(x) % self.W
+        iy = int(y) % self.H
+        self.agent_signal[iy, ix] += amount
 
     def sample(self, x: float, y: float, radius: int = 1) -> Dict[str, np.ndarray]:
         ix, iy = int(x) % self.W, int(y) % self.H
-        nutrient_vals, toxin_vals = [], []
+        nutrient_vals, toxin_vals, light_vals, signal_vals = [], [], [], []
         for dy in range(-radius, radius + 1):
             for dx in range(-radius, radius + 1):
                 nx, ny = (ix + dx) % self.W, (iy + dy) % self.H
                 nutrient_vals.append(self.nutrient[ny, nx])
                 toxin_vals.append(self.toxin[ny, nx])
-        light_vals = []
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                nx, ny = (ix + dx) % self.W, (iy + dy) % self.H
                 light_vals.append(self.light[ny, nx])
+                signal_vals.append(float(self.agent_signal[ny, nx]))
         return {
-            'nutrient': np.array(nutrient_vals),
-            'toxin':    np.array(toxin_vals),
-            'light':    np.array(light_vals),
-            'temp':     float(self.temperature[iy, ix]),
+            'nutrient':     np.array(nutrient_vals),
+            'toxin':        np.array(toxin_vals),
+            'light':        np.array(light_vals),
+            'agent_signal': np.array(signal_vals),
+            'temp':         float(self.temperature[iy, ix]),
         }
 
     def consume(self, x: float, y: float, amount: float) -> float:

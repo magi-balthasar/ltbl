@@ -9,14 +9,15 @@ class ConsciousnessMonitor:
         if not agents:
             return {f'C{i}': 0.0 for i in range(7)}
         return {
-            'C0':  self._c0_internal_complexity(agents),
-            'C1':  self._c1_internal_driven_ratio(agents),
-            'C2':  self._c2_temporal_depth(agents),
-            'C2b': self._c2b_gradient_temporal(agents),
-            'C3':  self._c3_prediction_accuracy(agents),  # Phase 1-C: light prediction
-            'C4':  0.0,
-            'C5':  0.0,
-            'C6':  0.0,
+            'C0':   self._c0_internal_complexity(agents),
+            'C1':   self._c1_internal_driven_ratio(agents),
+            'C2':   self._c2_temporal_depth(agents),
+            'C2b':  self._c2b_gradient_temporal(agents),
+            'C3':   self._c3_prediction_accuracy(agents),
+            'C_QS': self._c_qs_quorum_sensitivity(agents),  # Phase 1-D
+            'C4':   0.0,
+            'C5':   0.0,
+            'C6':   0.0,
         }
 
     def consciousness_level(self, metrics: Dict[str, float]) -> int:
@@ -108,6 +109,31 @@ class ConsciousnessMonitor:
             corr = float(np.corrcoef(predicted, actual)[0, 1])
             corrs.append(max(0.0, corr))   # positive corr = prediction matched
         return float(np.mean(corrs)) if corrs else 0.0
+
+    # ── C_QS: quorum sensitivity (Phase 1-D quorum sensing) ─────────────────
+    # Measures whether agents reliably switch collective mode as local signal rises.
+    # High C_QS = quorum threshold is ecologically meaningful, not noise.
+    # Detects 10-tuple entries via len(entry) >= 10.
+
+    def _c_qs_quorum_sensitivity(self, agents: list) -> float:
+        signals = []
+        shifts  = []
+        for a in agents:
+            log = [e for e in a.behavior_log if len(e) >= 10]
+            if len(log) < 4:
+                continue
+            for i in range(1, len(log)):
+                prev_qs = log[i - 1][9]
+                curr_qs = log[i][9]
+                signals.append(log[i][8])          # local_signal
+                shifts.append(abs(curr_qs - prev_qs))  # did quorum state flip?
+        if len(signals) < 10:
+            return 0.0
+        s = np.array(signals)
+        f = np.array(shifts)
+        if np.std(s) < 1e-8 or np.std(f) < 1e-8:
+            return 0.0
+        return max(0.0, float(np.corrcoef(s, f)[0, 1]))
 
     # ── C2b: gradient temporal depth (Phase 1-B chemotaxis) ─────────────────
     # High C2b = worsening chemical gradient reliably triggers tumble.
