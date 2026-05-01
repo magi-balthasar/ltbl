@@ -3,6 +3,14 @@ from dataclasses import dataclass, field
 from typing import List
 import uuid
 
+# ── Phase 2 nerve-net constants ───────────────────────────────────────────────
+NERVE_N     = 3   # number of recurrent neurons (fixed: physics we declare)
+NERVE_W_IN  = NERVE_N * NERVE_N   # (N, N): 3 abstract signals → N neurons
+NERVE_W_REC = NERVE_N * NERVE_N   # (N, N): recurrent connections (CPG possible)
+NERVE_W_OUT = 2   * NERVE_N       # (2, N): neurons → vx, vy
+NERVE_EXTRA = 1                   # neural_weight blend scalar
+NERVE_TOTAL = NERVE_W_IN + NERVE_W_REC + NERVE_W_OUT + NERVE_EXTRA  # 25
+
 
 GENOME_SCHEMA = [
     # (name, default, min, max)
@@ -71,10 +79,25 @@ class Genome:
     signal_sensitivity: float = 0.5
     quorum_threshold: float = 0.4
     collective_bias: float = 0.5
+    # Phase 2: distributed nerve net (N=3 recurrent neurons)
+    # Matrices stored as arrays; serialised as flat vector after GENOME_SCHEMA scalars.
+    # Design: we declare "N neurons with recurrent connections exist."
+    # We do NOT declare which connectivity pattern emerges — evolution decides.
+    nerve_w_in:    np.ndarray = field(default_factory=lambda: np.zeros((NERVE_N, NERVE_N)))
+    nerve_w_rec:   np.ndarray = field(default_factory=lambda: np.zeros((NERVE_N, NERVE_N)))
+    nerve_w_out:   np.ndarray = field(default_factory=lambda: np.zeros((2, NERVE_N)))
+    neural_weight: float = 0.1   # blend: 0=pure Phase-1 behaviour, 1=pure neural
 
     def to_vector(self) -> np.ndarray:
         scalars = [getattr(self, name) for name, *_ in GENOME_SCHEMA]
-        return np.concatenate([self.sensor_weights, scalars])
+        return np.concatenate([
+            self.sensor_weights,        # 8
+            scalars,                    # 19  (SCALAR_COUNT)
+            self.nerve_w_in.ravel(),    # 9
+            self.nerve_w_rec.ravel(),   # 9
+            self.nerve_w_out.ravel(),   # 6
+            [self.neural_weight],       # 1
+        ])  # total: GENOME_DIM + NERVE_TOTAL = 27 + 25 = 52
 
     @classmethod
     def from_vector(cls, vec: np.ndarray, parent_ids: List[str] = None,
@@ -89,6 +112,21 @@ class Genome:
             idx = SENSOR_COUNT + i
             val = float(np.clip(vec[idx], lo, hi)) if idx < len(vec) else default
             setattr(g, name, val)
+        # ── Phase 2 nerve-net matrices (backward-compat: zeros if vec too short) ──
+        offset = GENOME_DIM  # = SENSOR_COUNT + SCALAR_COUNT
+        if len(vec) >= offset + NERVE_TOTAL:
+            g.nerve_w_in  = vec[offset:offset + NERVE_W_IN].reshape(NERVE_N, NERVE_N).copy()
+            offset += NERVE_W_IN
+            g.nerve_w_rec = vec[offset:offset + NERVE_W_REC].reshape(NERVE_N, NERVE_N).copy()
+            offset += NERVE_W_REC
+            g.nerve_w_out = vec[offset:offset + NERVE_W_OUT].reshape(2, NERVE_N).copy()
+            offset += NERVE_W_OUT
+            g.neural_weight = float(np.clip(vec[offset], 0.0, 1.0))
+        else:
+            g.nerve_w_in    = np.zeros((NERVE_N, NERVE_N))
+            g.nerve_w_rec   = np.zeros((NERVE_N, NERVE_N))
+            g.nerve_w_out   = np.zeros((2, NERVE_N))
+            g.neural_weight = 0.1
         return g
 
     def copy(self) -> 'Genome':

@@ -21,7 +21,13 @@ class ReplicationEngine:
     def sexual(self, parent_a: Genome, parent_b: Genome) -> Genome:
         vec_a = parent_a.to_vector()
         vec_b = parent_b.to_vector()
-        mask = np.random.rand(GENOME_DIM) < 0.5
+        # Use full vector length (supports genome expansion across phases)
+        n = max(len(vec_a), len(vec_b))
+        if len(vec_a) < n:
+            vec_a = np.pad(vec_a, (0, n - len(vec_a)))
+        if len(vec_b) < n:
+            vec_b = np.pad(vec_b, (0, n - len(vec_b)))
+        mask = np.random.rand(n) < 0.5
         child_vec = self._mutate(np.where(mask, vec_a, vec_b))
         return Genome.from_vector(
             child_vec,
@@ -32,9 +38,10 @@ class ReplicationEngine:
     def lamarckian(self, genome: Genome, experience: np.ndarray, lr: float = 0.02) -> Genome:
         """Compress lifetime experience gradient into genome."""
         vec = genome.to_vector()
-        exp_clipped = experience[:GENOME_DIM]
-        if len(exp_clipped) < GENOME_DIM:
-            exp_clipped = np.pad(exp_clipped, (0, GENOME_DIM - len(exp_clipped)))
+        n = len(vec)
+        exp_clipped = experience[:n]
+        if len(exp_clipped) < n:
+            exp_clipped = np.pad(exp_clipped, (0, n - len(exp_clipped)))
         # Normalize experience signal
         norm = np.linalg.norm(exp_clipped) + 1e-8
         child_vec = self._mutate(vec + lr * exp_clipped / norm,

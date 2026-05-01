@@ -8,16 +8,19 @@ class ConsciousnessMonitor:
     def measure(self, agents: list) -> Dict[str, float]:
         if not agents:
             return {f'C{i}': 0.0 for i in range(7)}
+        cnet, cnet_sign = self._c_net_coherence(agents)
         return {
-            'C0':   self._c0_internal_complexity(agents),
-            'C1':   self._c1_internal_driven_ratio(agents),
-            'C2':   self._c2_temporal_depth(agents),
-            'C2b':  self._c2b_gradient_temporal(agents),
-            'C3':   self._c3_prediction_accuracy(agents),
-            'C_QS': self._c_qs_quorum_sensitivity(agents),  # Phase 1-D
-            'C4':   0.0,
-            'C5':   0.0,
-            'C6':   0.0,
+            'C0':        self._c0_internal_complexity(agents),
+            'C1':        self._c1_internal_driven_ratio(agents),
+            'C2':        self._c2_temporal_depth(agents),
+            'C2b':       self._c2b_gradient_temporal(agents),
+            'C3':        self._c3_prediction_accuracy(agents),
+            'C_QS':      self._c_qs_quorum_sensitivity(agents),   # Phase 1-D
+            'C_NET':     cnet,       # Phase 2: neural coherence (|autocorr|)
+            'C_NET_sign': cnet_sign, # Phase 2: sign → negative=CPG, positive=integrator
+            'C4':        0.0,
+            'C5':        0.0,
+            'C6':        0.0,
         }
 
     def consciousness_level(self, metrics: Dict[str, float]) -> int:
@@ -134,6 +137,38 @@ class ConsciousnessMonitor:
         if np.std(s) < 1e-8 or np.std(f) < 1e-8:
             return 0.0
         return max(0.0, float(np.corrcoef(s, f)[0, 1]))
+
+    # ── C_NET: neural coherence (Phase 2 nerve net) ─────────────────────────
+    # 신경망 숨겨진 상태의 시간적 일관성을 측정.
+    # lag-1 자기상관:
+    #   음수 → 교번(진동) 패턴 → CPG attractor 창발
+    #   양수 → 지속(통합기) 패턴
+    #   ≈ 0  → 무작위 / 노이즈
+    # 반환: (|autocorr| 평균, autocorr 평균)
+    #   첫 번째: coherence 크기 (0=무작위, 1=완전 일관)
+    #   두 번째: 부호 (음=CPG, 양=통합기)
+    # 12-tuple 항목으로 Phase 2 에이전트 감지 (len(entry) >= 12).
+
+    def _c_net_coherence(self, agents: list):
+        series_list = [
+            np.array(a.hidden_history)
+            for a in agents
+            if hasattr(a, 'hidden_history') and len(a.hidden_history) >= 8
+        ]
+        if not series_list:
+            return 0.0, 0.0
+        abs_acorrs = []
+        raw_acorrs = []
+        for h in series_list:
+            if h.std() < 1e-6:
+                continue
+            h_norm = (h - h.mean()) / (h.std() + 1e-8)
+            ac = float(np.corrcoef(h_norm[:-1], h_norm[1:])[0, 1])
+            abs_acorrs.append(abs(ac))
+            raw_acorrs.append(ac)
+        if not abs_acorrs:
+            return 0.0, 0.0
+        return float(np.mean(abs_acorrs)), float(np.mean(raw_acorrs))
 
     # ── C2b: gradient temporal depth (Phase 1-B chemotaxis) ─────────────────
     # High C2b = worsening chemical gradient reliably triggers tumble.
