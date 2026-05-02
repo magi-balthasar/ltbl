@@ -11,6 +11,12 @@ NERVE_W_OUT = 2   * NERVE_N       # (2, N): neurons → vx, vy
 NERVE_EXTRA = 1                   # neural_weight blend scalar
 NERVE_TOTAL = NERVE_W_IN + NERVE_W_REC + NERVE_W_OUT + NERVE_EXTRA  # 25
 
+# ── Phase 3 nematode constants ────────────────────────────────────────────────
+NEMA_N_SEGS  = 7   # 머리 + 6 몸체 분절 (C. elegans 운동 모델)
+NEMA_SCALARS = 4   # wave_amplitude, body_stiffness, proprioception_weight, mutation_rate_gene
+# 직렬화 순서: Phase 2 행렬 뒤에 추가 → 52-dim 게놈과 후방 호환
+# mutation_rate_gene: 돌연변이율 자체가 진화함 (사용자 노트: "돌연변이율을 결정하는 유전자도 존재")
+
 
 GENOME_SCHEMA = [
     # (name, default, min, max)
@@ -87,6 +93,15 @@ class Genome:
     nerve_w_rec:   np.ndarray = field(default_factory=lambda: np.zeros((NERVE_N, NERVE_N)))
     nerve_w_out:   np.ndarray = field(default_factory=lambda: np.zeros((2, NERVE_N)))
     neural_weight: float = 0.1   # blend: 0=pure Phase-1 behaviour, 1=pure neural
+    # Phase 3: nematode body parameters (appended after Phase 2 for backward compat)
+    # Design: "N=7 분절 몸체와 관절이 존재한다." — 어떤 파형이 선택될지는 진화가 결정.
+    wave_amplitude:        float = 0.3   # 몸체 진동 진폭 (0=직선, 1=최대 굽힘)
+    body_stiffness:        float = 0.5   # 관절 관성 (0=유체, 0.95=강체)
+    proprioception_weight: float = 0.3   # 고유감각 피드백 강도
+    # 돌연변이율 유전자: "돌연변이율을 결정하는 유전자도 존재 → 돌연변이율 자체가 최적화됨"
+    # 세포 분열당 10억분의 1 오류를 유지하는 DNA 복구 효소처럼, 이 유전자가 돌연변이율을 결정.
+    # 적정 수준의 오류를 유지 → 진화 가능성 보존. 너무 낮으면 적응 불가, 너무 높으면 정보 붕괴.
+    mutation_rate_gene:    float = 0.01  # 유효 돌연변이율 (0.001~0.1)
 
     def to_vector(self) -> np.ndarray:
         scalars = [getattr(self, name) for name, *_ in GENOME_SCHEMA]
@@ -96,8 +111,11 @@ class Genome:
             self.nerve_w_in.ravel(),    # 9
             self.nerve_w_rec.ravel(),   # 9
             self.nerve_w_out.ravel(),   # 6
-            [self.neural_weight],       # 1
-        ])  # total: GENOME_DIM + NERVE_TOTAL = 27 + 25 = 52
+            [self.neural_weight],       # 1   → offset 52
+            # Phase 3: nematode scalars (after Phase 2 for backward compat)
+            [self.wave_amplitude, self.body_stiffness,
+             self.proprioception_weight, self.mutation_rate_gene],  # 4
+        ])  # total: 56
 
     @classmethod
     def from_vector(cls, vec: np.ndarray, parent_ids: List[str] = None,
@@ -122,11 +140,30 @@ class Genome:
             g.nerve_w_out = vec[offset:offset + NERVE_W_OUT].reshape(2, NERVE_N).copy()
             offset += NERVE_W_OUT
             g.neural_weight = float(np.clip(vec[offset], 0.0, 1.0))
+            offset += NERVE_EXTRA
         else:
             g.nerve_w_in    = np.zeros((NERVE_N, NERVE_N))
             g.nerve_w_rec   = np.zeros((NERVE_N, NERVE_N))
             g.nerve_w_out   = np.zeros((2, NERVE_N))
             g.neural_weight = 0.1
+            offset = GENOME_DIM + NERVE_TOTAL
+        # ── Phase 3 nematode scalars (backward-compat: defaults if vec too short) ──
+        if len(vec) >= offset + NEMA_SCALARS:
+            g.wave_amplitude        = float(np.clip(vec[offset],     0.0, 1.0))
+            g.body_stiffness        = float(np.clip(vec[offset + 1], 0.0, 0.95))
+            g.proprioception_weight = float(np.clip(vec[offset + 2], 0.0, 1.0))
+            g.mutation_rate_gene    = float(np.clip(vec[offset + 3], 0.001, 0.1))
+        elif len(vec) >= offset + 3:
+            # 55-dim 이전 게놈 호환: mutation_rate_gene만 기본값
+            g.wave_amplitude        = float(np.clip(vec[offset],     0.0, 1.0))
+            g.body_stiffness        = float(np.clip(vec[offset + 1], 0.0, 0.95))
+            g.proprioception_weight = float(np.clip(vec[offset + 2], 0.0, 1.0))
+            g.mutation_rate_gene    = 0.01
+        else:
+            g.wave_amplitude        = 0.3
+            g.body_stiffness        = 0.5
+            g.proprioception_weight = 0.3
+            g.mutation_rate_gene    = 0.01
         return g
 
     def copy(self) -> 'Genome':

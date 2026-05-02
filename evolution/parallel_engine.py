@@ -22,13 +22,16 @@ class IslandActor:
         from agents.phototaxis import PhototaxisAgent
         from agents.quorum import QuorumSensingAgent
         from agents.nerve_net import NerveNetAgent
+        from agents.nematode import NematodeAgent
         from genetics.genome import Genome
         from genetics.replication import ReplicationEngine
         from genetics.lineage_tracker import LineageTracker
         from consciousness.level_monitor import ConsciousnessMonitor
 
         self.cfg = config
-        if config.agent_type == 'nerve_net':
+        if config.agent_type == 'nematode':
+            self.agent_cls = NematodeAgent
+        elif config.agent_type == 'nerve_net':
             self.agent_cls = NerveNetAgent
         elif config.agent_type == 'quorum':
             self.agent_cls = QuorumSensingAgent
@@ -164,7 +167,11 @@ class IslandActor:
         if mode == 'asexual':
             return self.replicator.asexual(agent.genome)
         if mode == 'sexual' and len(self.agents) > 1:
-            partner = self.agents[np.random.randint(len(self.agents))]
+            # MHC 등가물: 유전적으로 다양한 파트너 선호
+            if getattr(self.cfg, 'mate_selection', 'random') == 'mhc':
+                partner = self.replicator.select_mate_mhc(agent.genome, self.agents)
+            else:
+                partner = self.agents[np.random.randint(len(self.agents))]
             return self.replicator.sexual(agent.genome, partner.genome)
         if mode == 'lamarckian':
             return self.replicator.lamarckian(agent.genome, agent.avg_experience)

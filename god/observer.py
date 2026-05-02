@@ -34,6 +34,7 @@ class GodObserver:
                 c_level          INTEGER,
                 c0 REAL, c1 REAL, c2 REAL, c2b REAL, c3 REAL, c_qs REAL,
                 c_net REAL, c_net_sign REAL,
+                c4 REAL, c_cpg REAL,
                 avg_generation   REAL,
                 max_generation   INTEGER,
                 avg_energy       REAL,
@@ -42,9 +43,9 @@ class GodObserver:
                 pressure         REAL
             )
         ''')
-        # Migrate existing tables that lack Phase-2 columns
+        # Migrate existing tables that lack Phase-2/3 columns
         existing = {row[1] for row in self.conn.execute('PRAGMA table_info(observations)')}
-        for col in ('c_net', 'c_net_sign'):
+        for col in ('c_net', 'c_net_sign', 'c4', 'c_cpg'):
             if col not in existing:
                 self.conn.execute(f'ALTER TABLE observations ADD COLUMN {col} REAL DEFAULT 0.0')
         self.conn.execute('''
@@ -73,6 +74,7 @@ class GodObserver:
                 m['C0'], m['C1'], m['C2'], m.get('C2b', 0.0),
                 m.get('C3', 0.0), m.get('C_QS', 0.0),
                 m.get('C_NET', 0.0), m.get('C_NET_sign', 0.0),
+                m.get('C4', 0.0), m.get('C_CPG', 0.0),
                 r['avg_generation'], r['max_generation'], r['avg_energy'],
                 r.get('survival_rate', 1.0),
                 r.get('cluster_signal', 0.0),
@@ -89,7 +91,7 @@ class GodObserver:
                 )
 
         self.conn.executemany(
-            'INSERT INTO observations VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', rows
+            'INSERT INTO observations VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', rows
         )
         self.conn.commit()
 
@@ -117,6 +119,11 @@ class GodObserver:
                     '↺' if m.get('C_NET_sign', 0.0) < 0 else '→')
                 extra = (f" C3={m.get('C3', 0.0):.2f}"
                          f" NET={m.get('C_NET', 0.0):.2f}{sign_char}")
+            elif atype == 'nematode':
+                cpg = m.get('C_CPG', 0.0)
+                cpg_char = '↺' if cpg < -0.05 else ('→' if cpg > 0.05 else '↕')
+                extra = (f" CPG={cpg:.2f}{cpg_char}"
+                         f" C4={m.get('C4', 0.0):.2f}")
             lines.append(
                 f"│ [{r['island_id']}] {atype[0].upper()}{r['replication_mode']:11s} μ={r['mutation_rate']:.3f} "
                 f"pop={r['population']:4d} gen={r['avg_generation']:4.1f}/{r['max_generation']:3d} "

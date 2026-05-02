@@ -10,17 +10,18 @@ class ConsciousnessMonitor:
             return {f'C{i}': 0.0 for i in range(7)}
         cnet, cnet_sign = self._c_net_coherence(agents)
         return {
-            'C0':        self._c0_internal_complexity(agents),
-            'C1':        self._c1_internal_driven_ratio(agents),
-            'C2':        self._c2_temporal_depth(agents),
-            'C2b':       self._c2b_gradient_temporal(agents),
-            'C3':        self._c3_prediction_accuracy(agents),
-            'C_QS':      self._c_qs_quorum_sensitivity(agents),   # Phase 1-D
-            'C_NET':     cnet,       # Phase 2: neural coherence (|autocorr|)
-            'C_NET_sign': cnet_sign, # Phase 2: sign → negative=CPG, positive=integrator
-            'C4':        0.0,
-            'C5':        0.0,
-            'C6':        0.0,
+            'C0':         self._c0_internal_complexity(agents),
+            'C1':         self._c1_internal_driven_ratio(agents),
+            'C2':         self._c2_temporal_depth(agents),
+            'C2b':        self._c2b_gradient_temporal(agents),
+            'C3':         self._c3_prediction_accuracy(agents),
+            'C_QS':       self._c_qs_quorum_sensitivity(agents),   # Phase 1-D
+            'C_NET':      cnet,       # Phase 2: neural coherence (|autocorr|)
+            'C_NET_sign': cnet_sign,  # Phase 2: sign → negative=CPG, positive=integrator
+            'C4':         self._c4_self_model(agents),  # Phase 3: 자기 몸 모델
+            'C_CPG':      self._c_cpg_oscillation(agents),  # Phase 3: CPG 창발 (부호 있는 hidden[0] 자기상관)
+            'C5':         0.0,
+            'C6':         0.0,
         }
 
     def consciousness_level(self, metrics: Dict[str, float]) -> int:
@@ -29,6 +30,10 @@ class ConsciousnessMonitor:
         c2  = metrics['C2']
         c2b = metrics.get('C2b', 0.0)
         c3  = metrics.get('C3',  0.0)
+        c4  = metrics.get('C4',  0.0)
+        # C=4: 자기 모델 원형 — 신경 활성이 자기 몸 상태를 반영
+        if c4 > 0.4:
+            return 4
         # C=3: agent correctly predicts future state and acts on it
         if c3 > 0.3:
             return 3
@@ -169,6 +174,48 @@ class ConsciousnessMonitor:
         if not abs_acorrs:
             return 0.0, 0.0
         return float(np.mean(abs_acorrs)), float(np.mean(raw_acorrs))
+
+    # ── C4: self-model (Phase 3 nematode) ───────────────────────────────────
+    # 신경 활성화 norm과 몸 곡률의 상관관계.
+    # High C4 = 신경망이 자기 신체 상태를 반영 = 자기 모델 원형 창발.
+    # 생물학: proprioception이 CNS와 결합 → 신체 schema 형성.
+    # 14-tuple 항목으로 Phase 3 에이전트 감지 (len(entry) >= 14).
+
+    def _c4_self_model(self, agents: list) -> float:
+        corrs = []
+        for a in agents:
+            if not (hasattr(a, 'hidden_history') and hasattr(a, 'curvature_history')):
+                continue
+            h = np.array(a.hidden_history)
+            c = np.array(a.curvature_history)
+            n = min(len(h), len(c))
+            if n < 8:
+                continue
+            h, c = h[-n:], c[-n:]
+            if np.std(h) < 1e-6 or np.std(c) < 1e-6:
+                continue
+            corr = abs(float(np.corrcoef(h, c)[0, 1]))
+            corrs.append(corr)
+        return float(np.mean(corrs)) if corrs else 0.0
+
+    # ── C_CPG: CPG oscillation detection (Phase 3 nematode) ─────────────────
+    # hidden[0]의 lag-1 자기상관 (부호 있는).
+    # 음수 → hidden[0]이 교번 → CPG 진동 attractor 창발.
+    # ||hidden|| 노름이 아닌 부호 있는 성분을 측정하는 것이 핵심
+    # (C_NET_sign은 노름을 사용해서 진동 감지 불가능했음).
+
+    def _c_cpg_oscillation(self, agents: list) -> float:
+        signs = []
+        for a in agents:
+            if not hasattr(a, 'rhythm_h_history') or len(a.rhythm_h_history) < 8:
+                continue
+            h = np.array(a.rhythm_h_history)
+            if h.std() < 1e-6:
+                continue
+            h_norm = (h - h.mean()) / (h.std() + 1e-8)
+            ac = float(np.corrcoef(h_norm[:-1], h_norm[1:])[0, 1])
+            signs.append(ac)
+        return float(np.mean(signs)) if signs else 0.0
 
     # ── C2b: gradient temporal depth (Phase 1-B chemotaxis) ─────────────────
     # High C2b = worsening chemical gradient reliably triggers tumble.
