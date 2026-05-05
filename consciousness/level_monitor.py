@@ -19,8 +19,10 @@ class ConsciousnessMonitor:
             'C_NET':      cnet,       # Phase 2: neural coherence (|autocorr|)
             'C_NET_sign': cnet_sign,  # Phase 2: sign → negative=CPG, positive=integrator
             'C4':         self._c4_self_model(agents),  # Phase 3: 자기 몸 모델
-            'C_CPG':      self._c_cpg_oscillation(agents),  # Phase 3: CPG 창발 (부호 있는 hidden[0] 자기상관)
-            'C5':         0.0,
+            'C_CPG':      self._c_cpg_oscillation(agents),  # Phase 3: CPG 창발
+            'C5':         self._c5_collective_response(agents),   # Phase 4: 집단 반응 일관성
+            'C_PLASTIC':  self._c_plastic(agents),                # Phase 4: Hebbian 학습 발생 여부
+            'C_BALDWIN':  self._c_baldwin(agents),                # Phase 4: 볼드윈 효과 탐지
             'C6':         0.0,
         }
 
@@ -216,6 +218,74 @@ class ConsciousnessMonitor:
             ac = float(np.corrcoef(h_norm[:-1], h_norm[1:])[0, 1])
             signs.append(ac)
         return float(np.mean(signs)) if signs else 0.0
+
+    # ── C5: collective response coherence (Phase 4 fish) ────────────────────
+    # 측선 신호 변화 → 집단 이동 방향 변화 상관관계.
+    # C5 > 0.3 = 군집이 외부 자극에 집단적으로 반응함 (schooling 창발 탐지).
+    # 16-tuple 항목으로 Phase 4 에이전트 감지 (len(entry) >= 16).
+
+    def _c5_collective_response(self, agents: list) -> float:
+        fish_agents = [a for a in agents if hasattr(a, 'lateral_flow_history')]
+        if len(fish_agents) < 4:
+            return 0.0
+        # 집단 측선 신호 강도 (평균)
+        lat_series = []
+        move_series = []
+        for a in fish_agents:
+            if len(a.lateral_flow_history) < 8:
+                continue
+            lat_mags = np.array([float(np.linalg.norm(f))
+                                  for f in a.lateral_flow_history])
+            # 이동 방향 변화: behavior_log에서 추출
+            log = [e for e in a.behavior_log if len(e) >= 16]
+            if len(log) < 4:
+                continue
+            lat_series.append(lat_mags[-min(len(lat_mags), len(log)):])
+        if len(lat_series) < 4:
+            return 0.0
+        # 집단 측선 신호 동기화: 에이전트 간 lat_mag 시계열 상관
+        corrs = []
+        series = [s for s in lat_series if len(s) >= 4]
+        for i in range(len(series)):
+            for j in range(i + 1, len(series)):
+                n = min(len(series[i]), len(series[j]))
+                si, sj = series[i][-n:], series[j][-n:]
+                if np.std(si) < 1e-6 or np.std(sj) < 1e-6:
+                    continue
+                c = float(np.corrcoef(si, sj)[0, 1])
+                corrs.append(max(0.0, c))
+        return float(np.mean(corrs)) if corrs else 0.0
+
+    # ── C_PLASTIC: Hebbian 학습 발생 여부 (Phase 4 fish) ─────────────────────
+    # mean(‖Δplastic_delta_w‖) across fish agents.
+    # > 0 = 생애 동안 가소성 변화가 실제로 일어남.
+
+    def _c_plastic(self, agents: list) -> float:
+        norms = []
+        for a in agents:
+            if not hasattr(a, 'plastic_delta_w'):
+                continue
+            norms.append(float(np.linalg.norm(a.plastic_delta_w)))
+        return float(np.mean(norms)) if norms else 0.0
+
+    # ── C_BALDWIN: 볼드윈 효과 탐지 (Phase 4 fish) ───────────────────────────
+    # 부모의 plastic_delta_w가 자식의 hind_w_rec에 반영되는 정도.
+    # corr(parent.plastic_delta_w, child.hind_w_rec - zeros_baseline)
+    # 단순 버전: hind_w_rec의 비영(non-zero) 비율 (가소성이 게놈에 누적되는 신호).
+
+    def _c_baldwin(self, agents: list) -> float:
+        nonzero_fracs = []
+        for a in agents:
+            if not hasattr(a, 'genome'):
+                continue
+            w = getattr(a.genome, 'hind_w_rec', None)
+            if w is None:
+                continue
+            total = w.size
+            if total == 0:
+                continue
+            nonzero_fracs.append(float(np.sum(np.abs(w) > 0.01)) / total)
+        return float(np.mean(nonzero_fracs)) if nonzero_fracs else 0.0
 
     # ── C2b: gradient temporal depth (Phase 1-B chemotaxis) ─────────────────
     # High C2b = worsening chemical gradient reliably triggers tumble.

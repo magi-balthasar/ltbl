@@ -33,32 +33,40 @@ def parse_args():
 
 
 def run_single_island(args):
-    """Debug mode: one nematode island, no Ray (Phase 3)."""
+    """Debug mode: one fish island, no Ray (Phase 4)."""
     from world.primordial_sea import PrimordialSea, SeaConfig
-    from agents.nematode import NematodeAgent
+    from agents.fish import FishAgent
     from genetics.genome import Genome
     from genetics.replication import ReplicationEngine
     from consciousness.level_monitor import ConsciousnessMonitor
 
-    cfg = IslandConfig(island_id=0, agent_type='nematode',
+    cfg = IslandConfig(island_id=0, agent_type='fish',
                        replication_mode='sexual', mutation_rate=0.02,
                        world_width=100, world_height=100, initial_agents=30,
-                       max_agents=200, ticks_per_step=20)
+                       max_agents=200, ticks_per_step=20, predator_count=3)
 
     sea = PrimordialSea(SeaConfig(width=cfg.world_width, height=cfg.world_height))
     replicator = ReplicationEngine(base_mutation_rate=cfg.mutation_rate)
     monitor = ConsciousnessMonitor()
     import numpy as np
-    agents = [NematodeAgent(
+    agents = [FishAgent(
         float(cfg.world_width * (i % 10) / 10 + 5),
         float(cfg.world_height * (i // 10) / 10 + 5),
         Genome(), mode=cfg.replication_mode
     ) for i in range(cfg.initial_agents)]
 
+    # Phase 4: 포식자 (조건만 선언)
+    predators = [
+        {'x': np.random.uniform(0, cfg.world_width),
+         'y': np.random.uniform(0, cfg.world_height),
+         'speed': 0.8}
+        for _ in range(cfg.predator_count)
+    ]
+
     from world.pressure_schedule import PressureSchedule
     pressure = PressureSchedule()
 
-    print("=== LTBL [single-island debug] ===\n")
+    print("=== LTBL [single-island debug, Phase 4 Fish] ===\n")
     for step in range(args.steps):
         pressure.tick()
         sea.step(pressure.level)
@@ -74,7 +82,7 @@ def run_single_island(args):
                     child_genome = replicator.sexual(a.genome, partner.genome)
                 else:
                     child_genome = replicator.asexual(a.genome)
-                child = NematodeAgent(a.x, a.y, child_genome, mode=cfg.replication_mode)
+                child = FishAgent(a.x, a.y, child_genome, mode=cfg.replication_mode)
                 next_gen.append(child)
             next_gen.append(a)
         agents = next_gen
@@ -85,11 +93,12 @@ def run_single_island(args):
             avg_e = sum(a.state.energy for a in agents) / max(len(agents), 1)
             avg_g = sum(a.genome.generation for a in agents) / max(len(agents), 1)
             avg_mut = sum(a.genome.mutation_rate_gene for a in agents) / max(len(agents), 1)
-            c_cpg = metrics.get('C_CPG', 0.0)
-            c4    = metrics.get('C4', 0.0)
+            c_cpg    = metrics.get('C_CPG', 0.0)
+            c5       = metrics.get('C5', 0.0)
+            c_plastic = metrics.get('C_PLASTIC', 0.0)
             print(f"step={step:4d}  pop={len(agents):4d}  gen={avg_g:5.1f}  "
                   f"E={avg_e:5.2f}  P={pressure.level:.3f}  C={c}  "
-                  f"C_CPG={c_cpg:+.3f}  C4={c4:.3f}  mut_gene={avg_mut:.4f}")
+                  f"C_CPG={c_cpg:+.3f}  C5={c5:.3f}  C_PLAST={c_plastic:.3f}  mut={avg_mut:.4f}")
 
 
 def run_parallel(args):

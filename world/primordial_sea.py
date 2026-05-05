@@ -23,6 +23,9 @@ class SeaConfig:
     # Phase 1-D: quorum signal
     signal_evaporation_rate: float = 0.02   # per-tick signal decay
     signal_diffusion_sigma: float = 0.5     # gaussian diffusion spread
+    # Phase 4: lateral line (agent flow field)
+    flow_evaporation_rate: float = 0.3      # 빠른 감쇠: 최근 이동만 감지
+    flow_diffusion_sigma: float = 1.2       # 물 압력파: 넓게 퍼짐
 
 
 class PrimordialSea:
@@ -40,6 +43,11 @@ class PrimordialSea:
         self.light = np.zeros((self.H, self.W))   # Phase 1-C: orbiting light
         self.light_tick = 0
         self.agent_signal = np.zeros((self.H, self.W), dtype=np.float32)  # Phase 1-D
+        # Phase 4: lateral line — 에이전트 이동이 만드는 물 흐름장
+        # 어류의 측선(lateral line)이 감지하는 수압파 등가물
+        # 에이전트가 deposit_flow()로 속도 벡터 기록 → 다음 틱에 감지
+        self.flow_vx = np.zeros((self.H, self.W), dtype=np.float32)
+        self.flow_vy = np.zeros((self.H, self.W), dtype=np.float32)
 
         # Pre-compute meshgrid for vectorised light calculation
         ys, xs = np.mgrid[0:self.H, 0:self.W]
@@ -144,6 +152,13 @@ class PrimordialSea:
         self.agent_signal = gaussian_filter(self.agent_signal,
                                             sigma=self.config.signal_diffusion_sigma)
         np.clip(self.agent_signal, 0.0, 5.0, out=self.agent_signal)
+        # Phase 4: flow field diffuses and evaporates (빠른 감쇠: 현재 이동만 반영)
+        self.flow_vx *= (1.0 - self.config.flow_evaporation_rate)
+        self.flow_vy *= (1.0 - self.config.flow_evaporation_rate)
+        self.flow_vx = gaussian_filter(self.flow_vx, sigma=self.config.flow_diffusion_sigma)
+        self.flow_vy = gaussian_filter(self.flow_vy, sigma=self.config.flow_diffusion_sigma)
+        np.clip(self.flow_vx, -2.0, 2.0, out=self.flow_vx)
+        np.clip(self.flow_vy, -2.0, 2.0, out=self.flow_vy)
         self.t += self.config.dt
 
     def deposit_signal(self, x: float, y: float, amount: float):
@@ -151,6 +166,13 @@ class PrimordialSea:
         ix = int(x) % self.W
         iy = int(y) % self.H
         self.agent_signal[iy, ix] += amount
+
+    def deposit_flow(self, x: float, y: float, vx: float, vy: float):
+        """Phase 4: 에이전트 이동 벡터를 흐름장에 기록 (측선 신호원)."""
+        ix = int(x) % self.W
+        iy = int(y) % self.H
+        self.flow_vx[iy, ix] += float(vx)
+        self.flow_vy[iy, ix] += float(vy)
 
     def sample(self, x: float, y: float, radius: int = 1) -> Dict[str, np.ndarray]:
         ix, iy = int(x) % self.W, int(y) % self.H
@@ -162,12 +184,16 @@ class PrimordialSea:
                 toxin_vals.append(self.toxin[ny, nx])
                 light_vals.append(self.light[ny, nx])
                 signal_vals.append(float(self.agent_signal[ny, nx]))
+        # Phase 4: lateral line — 반경 내 흐름장 평균 (수압파 등가물)
+        flow_vx_mean = float(self.flow_vx[iy, ix])
+        flow_vy_mean = float(self.flow_vy[iy, ix])
         return {
             'nutrient':     np.array(nutrient_vals),
             'toxin':        np.array(toxin_vals),
             'light':        np.array(light_vals),
             'agent_signal': np.array(signal_vals),
             'temp':         float(self.temperature[iy, ix]),
+            'agent_flow':   np.array([flow_vx_mean, flow_vy_mean]),  # 측선 신호
         }
 
     def consume(self, x: float, y: float, amount: float) -> float:

@@ -23,13 +23,16 @@ class IslandActor:
         from agents.quorum import QuorumSensingAgent
         from agents.nerve_net import NerveNetAgent
         from agents.nematode import NematodeAgent
+        from agents.fish import FishAgent
         from genetics.genome import Genome
         from genetics.replication import ReplicationEngine
         from genetics.lineage_tracker import LineageTracker
         from consciousness.level_monitor import ConsciousnessMonitor
 
         self.cfg = config
-        if config.agent_type == 'nematode':
+        if config.agent_type == 'fish':
+            self.agent_cls = FishAgent
+        elif config.agent_type == 'nematode':
             self.agent_cls = NematodeAgent
         elif config.agent_type == 'nerve_net':
             self.agent_cls = NerveNetAgent
@@ -46,6 +49,16 @@ class IslandActor:
             width=config.world_width, height=config.world_height,
             vent_count=config.vent_count,
         ))
+
+        # Phase 4: 포식자 (N=3 고정, 지능 없음 — 조건 선언만)
+        # 가장 가까운 먹이를 단순 추적 → 군집/측선 사용 에이전트에 선택압 부여
+        n_pred = getattr(config, 'predator_count', 0) if config.agent_type == 'fish' else 0
+        self.predators: List[Dict] = [
+            {'x': np.random.uniform(0, config.world_width),
+             'y': np.random.uniform(0, config.world_height),
+             'speed': 0.8}
+            for _ in range(n_pred)
+        ]
         self.replicator = ReplicationEngine(
             base_mutation_rate=config.mutation_rate,
             mutation_strength=config.mutation_strength,
@@ -76,6 +89,10 @@ class IslandActor:
         for _ in range(self.cfg.ticks_per_step):
             self.sea.step(pressure)
             next_gen: List[CellAgent] = []
+
+            # Phase 4: 포식자 이동 + 포식 (지능 없는 단순 추적)
+            if self.predators and self.agents:
+                self._step_predators(W, H)
 
             for agent in self.agents:
                 agent.step(self.sea, (W, H))
@@ -174,8 +191,56 @@ class IslandActor:
                 partner = self.agents[np.random.randint(len(self.agents))]
             return self.replicator.sexual(agent.genome, partner.genome)
         if mode == 'lamarckian':
+            # Phase 4 FishAgent: Baldwin 효과 (plastic_delta_w → hind_w_rec)
+            if hasattr(agent, 'plastic_delta_w'):
+                return self.replicator.lamarckian_fish(agent.genome, agent.plastic_delta_w)
             return self.replicator.lamarckian(agent.genome, agent.avg_experience)
         return self.replicator.asexual(agent.genome)
+
+    # ── Phase 4: 포식자 (지능 없음 — 단순 추적, 조건만 선언) ───────────────────
+
+    def _step_predators(self, W: int, H: int):
+        """
+        포식자 이동 + 포식.
+        설계한 것: 포식자가 존재한다, 먹이를 추적한다 (물리적 조건)
+        설계하지 않은 것: 먹이가 어떻게 반응할지 (진화가 결정)
+
+        포식 메커니즘:
+          - 접촉 거리 내 에이전트 에너지 30% 흡수
+          - 포식자는 복제 안 함 (고정 N=3)
+        """
+        if not self.agents:
+            return
+        positions = np.array([(a.x, a.y) for a in self.agents])
+        prey_alive = [True] * len(self.agents)
+
+        for pred in self.predators:
+            px, py = pred['x'], pred['y']
+            spd = pred['speed']
+            # 가장 가까운 먹이 찾기 (periodic boundary)
+            dx = positions[:, 0] - px
+            dy = positions[:, 1] - py
+            # Wrap to [-W/2, W/2]
+            dx = dx - W * np.round(dx / W)
+            dy = dy - H * np.round(dy / H)
+            dists = np.sqrt(dx ** 2 + dy ** 2)
+            idx = int(np.argmin(dists))
+            dist = float(dists[idx])
+
+            if dist < spd:
+                # 포식: 에너지 30% 흡수 + 포식자 위치 재설정
+                agent = self.agents[idx]
+                if agent.alive:
+                    taken = agent.state.energy * 0.3
+                    agent.state.energy = max(0.0, agent.state.energy - taken)
+                pred['x'] = (px + dx[idx]) % W
+                pred['y'] = (py + dy[idx]) % H
+            else:
+                # 가장 가까운 먹이 방향으로 이동
+                move_x = dx[idx] / (dist + 1e-8) * spd
+                move_y = dy[idx] / (dist + 1e-8) * spd
+                pred['x'] = (px + move_x) % W
+                pred['y'] = (py + move_y) % H
 
     # ── Migration ────────────────────────────────────────────────────────────
 

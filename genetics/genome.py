@@ -17,6 +17,16 @@ NEMA_SCALARS = 4   # wave_amplitude, body_stiffness, proprioception_weight, muta
 # 직렬화 순서: Phase 2 행렬 뒤에 추가 → 52-dim 게놈과 후방 호환
 # mutation_rate_gene: 돌연변이율 자체가 진화함 (사용자 노트: "돌연변이율을 결정하는 유전자도 존재")
 
+# ── Phase 4 fish (vertebrate hindbrain) constants ─────────────────────────────
+FISH_HIND_N  = 4   # 뇌간(hindbrain) 레이어 뉴런 수 (척수 N=3과 분리)
+# 측선(lateral line) 입력 → 뇌간 4뉴런이 통합
+# 척수(spinal, N=3) + 뇌간(hind, N=4) = 총 hidden N=7 (FishAgent에서 결합)
+FISH_HIND_W_REC   = FISH_HIND_N * FISH_HIND_N   # 4×4 = 16 (뇌간 재귀)
+FISH_HIND_W_OUT   = 2 * FISH_HIND_N             # 2×4 = 8  (뇌간 출력 → vx/vy 조율)
+FISH_HIND_W_CROSS = FISH_HIND_N * NERVE_N        # 4×3 = 12 (척수→뇌간 교차)
+FISH_SCALARS = 2   # plastic_learning_rate, lateral_sensitivity
+FISH_TOTAL = FISH_HIND_W_REC + FISH_HIND_W_OUT + FISH_HIND_W_CROSS + FISH_SCALARS  # 38
+
 
 GENOME_SCHEMA = [
     # (name, default, min, max)
@@ -102,6 +112,14 @@ class Genome:
     # 세포 분열당 10억분의 1 오류를 유지하는 DNA 복구 효소처럼, 이 유전자가 돌연변이율을 결정.
     # 적정 수준의 오류를 유지 → 진화 가능성 보존. 너무 낮으면 적응 불가, 너무 높으면 정보 붕괴.
     mutation_rate_gene:    float = 0.01  # 유효 돌연변이율 (0.001~0.1)
+    # Phase 4: vertebrate hindbrain (뇌간) — 척수 CPG 위에 계층적 통합 레이어
+    # 설계: "뇌간 레이어가 존재한다" — 어떤 연결이 선택될지는 진화가 결정
+    # 측선(lateral_line) 입력 + Hebbian 가소성 가능성을 선언
+    hind_w_rec:           np.ndarray = field(default_factory=lambda: np.zeros((FISH_HIND_N, FISH_HIND_N)))
+    hind_w_out:           np.ndarray = field(default_factory=lambda: np.zeros((2, FISH_HIND_N)))
+    hind_w_cross:         np.ndarray = field(default_factory=lambda: np.zeros((FISH_HIND_N, NERVE_N)))
+    plastic_learning_rate: float = 0.0   # Hebbian η: 0=고정, 0.05=빠른 가소성 (진화가 최적값 찾음)
+    lateral_sensitivity:  float = 0.5   # 측선 감도: 0=무시, 1=최대 감지
 
     def to_vector(self) -> np.ndarray:
         scalars = [getattr(self, name) for name, *_ in GENOME_SCHEMA]
@@ -115,7 +133,12 @@ class Genome:
             # Phase 3: nematode scalars (after Phase 2 for backward compat)
             [self.wave_amplitude, self.body_stiffness,
              self.proprioception_weight, self.mutation_rate_gene],  # 4
-        ])  # total: 56
+            # Phase 4: vertebrate hindbrain
+            self.hind_w_rec.ravel(),    # 16
+            self.hind_w_out.ravel(),    # 8
+            self.hind_w_cross.ravel(),  # 12
+            [self.plastic_learning_rate, self.lateral_sensitivity],  # 2
+        ])  # total: 94
 
     @classmethod
     def from_vector(cls, vec: np.ndarray, parent_ids: List[str] = None,
@@ -153,17 +176,36 @@ class Genome:
             g.body_stiffness        = float(np.clip(vec[offset + 1], 0.0, 0.95))
             g.proprioception_weight = float(np.clip(vec[offset + 2], 0.0, 1.0))
             g.mutation_rate_gene    = float(np.clip(vec[offset + 3], 0.001, 0.1))
+            offset += NEMA_SCALARS
         elif len(vec) >= offset + 3:
             # 55-dim 이전 게놈 호환: mutation_rate_gene만 기본값
             g.wave_amplitude        = float(np.clip(vec[offset],     0.0, 1.0))
             g.body_stiffness        = float(np.clip(vec[offset + 1], 0.0, 0.95))
             g.proprioception_weight = float(np.clip(vec[offset + 2], 0.0, 1.0))
             g.mutation_rate_gene    = 0.01
+            offset += 3
         else:
             g.wave_amplitude        = 0.3
             g.body_stiffness        = 0.5
             g.proprioception_weight = 0.3
             g.mutation_rate_gene    = 0.01
+            offset = GENOME_DIM + NERVE_TOTAL + NEMA_SCALARS
+        # ── Phase 4 hindbrain (backward-compat: zeros/defaults if vec too short) ──
+        if len(vec) >= offset + FISH_TOTAL:
+            g.hind_w_rec   = vec[offset:offset + FISH_HIND_W_REC].reshape(FISH_HIND_N, FISH_HIND_N).copy()
+            offset += FISH_HIND_W_REC
+            g.hind_w_out   = vec[offset:offset + FISH_HIND_W_OUT].reshape(2, FISH_HIND_N).copy()
+            offset += FISH_HIND_W_OUT
+            g.hind_w_cross = vec[offset:offset + FISH_HIND_W_CROSS].reshape(FISH_HIND_N, NERVE_N).copy()
+            offset += FISH_HIND_W_CROSS
+            g.plastic_learning_rate = float(np.clip(vec[offset],     0.0,  0.05))
+            g.lateral_sensitivity   = float(np.clip(vec[offset + 1], 0.0,  1.0))
+        else:
+            g.hind_w_rec            = np.zeros((FISH_HIND_N, FISH_HIND_N))
+            g.hind_w_out            = np.zeros((2, FISH_HIND_N))
+            g.hind_w_cross          = np.zeros((FISH_HIND_N, NERVE_N))
+            g.plastic_learning_rate = 0.0
+            g.lateral_sensitivity   = 0.5
         return g
 
     def copy(self) -> 'Genome':

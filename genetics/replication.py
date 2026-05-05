@@ -121,6 +121,36 @@ class ReplicationEngine:
 
     # ── 3. 라마르크식 — 바이스만 장벽 적용 ──────────────────────────────────────
 
+    def lamarckian_fish(self, genome: Genome, plastic_delta_w: np.ndarray,
+                        epigenetic_rate: float = 0.03) -> Genome:
+        """
+        Baldwin 효과 — FishAgent 전용 후성유전 전달.
+
+        설계한 것: 부모의 생애 학습(plastic_delta_w)이 자식 게놈(hind_w_rec)에
+                   약하게 반영될 수 있다는 가능성 (물리적 후성유전 등가물)
+        설계하지 않은 것: 무엇이 학습되는지, 어느 방향으로 진화하는지
+
+        바이스만 장벽 적용:
+          - epigenetic_rate ≪ 1 (0.03): 약한 신호만 투과
+          - 노이즈 × N(0, 0.3): 생식세포 경로의 불완전성
+          - 자식 hind_w_rec = parent_hind_w_rec + ε × Δw_plastic × 노이즈
+        """
+        vec = genome.to_vector()
+        child_vec = self._mutate(vec, rate=self._effective_rate(genome))
+        child = Genome.from_vector(child_vec, parent_ids=[genome.id],
+                                   generation=genome.generation + 1)
+        # hind_w_rec에 plastic_delta_w 약하게 반영 (Weismann barrier)
+        delta_flat = plastic_delta_w.ravel()
+        n_hind = child.hind_w_rec.size
+        if len(delta_flat) >= n_hind:
+            noise = np.random.randn(n_hind) * 0.3 + 1.0  # N(1, 0.3)
+            transfer = epigenetic_rate * delta_flat[:n_hind] * noise
+            child.hind_w_rec = np.clip(
+                child.hind_w_rec + transfer.reshape(child.hind_w_rec.shape),
+                -3.0, 3.0
+            )
+        return child
+
     def lamarckian(self, genome: Genome, experience: np.ndarray,
                    lr: float = 0.005) -> Genome:
         """
